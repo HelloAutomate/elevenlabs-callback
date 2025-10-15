@@ -1,12 +1,11 @@
 {
   "name": "elevenlabs-callback",
-  "version": "1.0.0",
-  "description": "Tiny Express server for GHL \u2192 ElevenLabs outbound calls + event callbacks",
+  "version": "1.1.0",
+  "description": "Tiny Express server for GHL \u2192 ElevenLabs outbound calls + event callbacks (supports GHL API key OR GHL inbound webhook)",
   "main": "server.cjs",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.cjs",
-    "dev": "node server.cjs"
+    "start": "node server.cjs"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -4,10 +4,9 @@ const fetch = require("node-fetch");
 const app = express();
 app.use(express.json());
 
-// Simple auth (optional but recommended)
 function checkAuth(req, res) {
   const expected = process.env.SHARED_SECRET || "";
-  if (!expected) return true; // no secret set, skip
+  if (!expected) return true;
   const got = req.headers["x-auth-token"];
   if (got !== expected) {
     res.status(401).json({ error: "Unauthorized" });
@@ -16,7 +15,6 @@ function checkAuth(req, res) {
   return true;
 }
 
-// Health check
 app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 // GHL → /dial → ElevenLabs
@@ -33,12 +31,10 @@ app.post("/dial", async (req, res) => {
   try {
     const payload = {
       to: phone,
-      from: process.env.TWILIO_FROM,       // same number you use for inbound
-      agent_id: process.env.ELE_AGENT_ID,  // ElevenLabs agent id
-      metadata: {
-        first_name, last_name, email, ghl_contact_id, opportunity_id, reason, booking_url
-      },
-      webhook_url: process.env.CALL_EVENTS_URL // this server's /call-events
+      from: process.env.TWILIO_FROM,
+      agent_id: process.env.ELE_AGENT_ID,
+      metadata: { first_name, last_name, email, ghl_contact_id, opportunity_id, reason, booking_url, phone },
+      webhook_url: process.env.CALL_EVENTS_URL
     };
 
     const r = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
@@ -62,38 +58,63 @@ app.post("/dial", async (req, res) => {
   }
 });
 
-// ElevenLabs → /call-events → GHL
+// ElevenLabs → /call-events → GHL (two modes)
+//  A) If GHL_API_KEY is set: call LeadConnector contacts/{id}/notes
+//  B) Else if GHL_INBOUND_WEBHOOK_URL is set: forward to GHL Inbound Webhook
 app.post("/call-events", async (req, res) => {
   const event = req.body || {};
   const { status, transcript_url, metadata } = event;
 
-  // Always ack quickly
-  res.sendStatus(200);
-
-  // Log visible in Railway
+  res.sendStatus(200); // ack fast
   console.log("ELE event:", JSON.stringify(event));
 
-  // Optional: write a note back to GHL
+  const noteText = [
+    `AI call status: ${status || "unknown"}`,
+    `Transcript: ${transcript_url || "N/A"}`,
+    metadata && metadata.reason ? `Reason: ${metadata.reason}` : null
+  ].filter(Boolean).join("\n");
+
   try {
-    if (!process.env.GHL_API_KEY || !metadata || !metadata.ghl_contact_id) return;
+    if (process.env.GHL_API_KEY && metadata && metadata.ghl_contact_id) {
+      // Mode A: Direct API
+      const resp = await fetch(`https://services.leadconnectorhq.com/contacts/${metadata.ghl_contact_id}/notes`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.GHL_API_KEY}`,
+          "Content-Type": "application/json",
+          "Version": "2021-07-28"
+        },
+        body: JSON.stringify({ body: noteText })
+      });
+      const text = await resp.text();
+      console.log("GHL note resp:", resp.status, text);
+      return;
+    }
 
-    const note = [
-      `AI call status: ${status || "unknown"}`,
-      `Transcript: ${transcript_url || "N/A"}`,
-      metadata.reason ? `Reason: ${metadata.reason}` : null
-    ].filter(Boolean).join("\n");
+    if (process.env.GHL_INBOUND_WEBHOOK_URL) {
+      // Mode B: Inbound Webhook (no API key needed)
+      const payload = {
+        contact_id: metadata && metadata.ghl_contact_id,
+        phone: metadata && metadata.phone,
+        status: status || "unknown",
+        transcript_url: transcript_url || "",
+        note: noteText,
+        reason: metadata && metadata.reason,
+        booking_url: metadata && metadata.booking_url
+      };
+      const resp = await fetch(process.env.GHL_INBOUND_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const text = await resp.text();
+      console.log("GHL inbound webhook resp:", resp.status, text);
+      return;
+    }
 
-    await fetch(`https://services.leadconnectorhq.com/contacts/${metadata.ghl_contact_id}/notes`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.GHL_API_KEY}`,
-        "Content-Type": "application/json",
-        "Version": "2021-07-28"
-      },
-      body: JSON.stringify({ body: note })
-    }).then(r => r.text()).then(t => console.log("GHL note resp:", t));
+    console.log("No GHL_API_KEY or GHL_INBOUND_WEBHOOK_URL set; skipping write-back.");
   } catch (err) {
-    console.error("Error posting note to GHL:", err);
+    console.error("Error posting to GHL:", err);
   }
 });
 

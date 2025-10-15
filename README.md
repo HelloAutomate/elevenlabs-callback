@@ -1,33 +1,37 @@
-# ElevenLabs ↔ GoHighLevel Callback Server (Railway)
+# ElevenLabs ↔ GHL Callback Server (Railway) — v2
 
-This is a tiny Express app that:
-- Receives a **GHL Webhook** at `/dial` and tells **ElevenLabs** to place an **outbound call** using your Twilio number.
-- Receives **ElevenLabs call events** at `/call-events` and (optionally) writes a **note** back to the GHL contact.
+Two ways to write call outcomes back to GHL:
 
-## Endpoints
-- `POST /dial` → Body must include at least `{ "phone": "+1..." }`
-- `POST /call-events` → ElevenLabs posts status + transcript here.
-- `GET /health` → returns `OK`
+**A) Direct API (requires Location API Key)**  
+Set `GHL_API_KEY` and the server will POST notes to:
+`https://services.leadconnectorhq.com/contacts/{id}/notes`
 
-## Local Run
-```bash
-npm install
-cp .env.example .env
-# fill env values in .env
-npm start
-# test health: curl http://localhost:8080/health
+**B) No API Key (Inbound Webhook workflow)**  
+Create a Workflow with **Trigger: Inbound Webhook** and actions like **Add/Update Contact** and **Add Note**.  
+Copy the webhook URL into `GHL_INBOUND_WEBHOOK_URL`. The server will forward a compact payload:
+```json
+{
+  "contact_id": "...",
+  "phone": "+353...",
+  "status": "completed",
+  "transcript_url": "https://...",
+  "note": "AI call status...",
+  "reason": "Form callback...",
+  "booking_url": "https://..."
+}
 ```
 
-## Railway Deploy
-1. Create a new project in Railway and deploy this repo (GitHub or upload).
-2. Add the same keys from `.env.example` as **Variables** in Railway.
-3. After deploy, set `CALL_EVENTS_URL` to `https://YOUR-SUBDOMAIN.up.railway.app/call-events`.
+## Endpoints
+- `POST /dial` → GHL Webhook hits this; we call ElevenLabs Outbound API.
+- `POST /call-events` → ElevenLabs calls this; we write back to GHL using A or B.
+- `GET /health` → returns OK.
 
-## GHL Workflow Webhook
-- **URL**: `https://YOUR-SUBDOMAIN.up.railway.app/dial`
-- **Method**: POST
-- **Headers**: `Content-Type: application/json`, `X-Auth-Token: <your SHARED_SECRET>`
-- **Body (JSON)**:
+## GHL Webhook (Outbound) → /dial
+Headers:
+- `Content-Type: application/json`
+- (optional) `X-Auth-Token: <your SHARED_SECRET>`
+
+Body:
 ```json
 {
   "phone": "{{contact.phone}}",
@@ -41,6 +45,6 @@ npm start
 }
 ```
 
-## Notes
-- Use the **same Twilio number** in `TWILIO_FROM` that handles inbound; ElevenLabs will use it for outbound caller ID.
-- If you set `SHARED_SECRET`, add the same value as an `X-Auth-Token` header in the GHL Webhook.
+## Railway Deploy
+- Add env vars from `.env.example` (don’t set both GHL modes; pick one).
+- After first deploy, set `CALL_EVENTS_URL` to your public URL + `/call-events` and redeploy.
