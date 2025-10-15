@@ -1,0 +1,15 @@
+{
+  "name": "elevenlabs-callback",
+  "version": "1.0.0",
+  "description": "Tiny Express server for GHL \u2192 ElevenLabs outbound calls + event callbacks",
+  "main": "server.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node server.cjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^2.6.7"
+  }
+}
